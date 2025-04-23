@@ -32,7 +32,7 @@ ln$feature <- "ln"
 thin$feature <- "thin"
 thick$feature <- "thick"
 
-# Feature map for user-friendly display
+# Feature mapping
 feature_map <- list(
   "Tree-in-bud" = "tib",
   "Ground-glass opacities" = "ggo",
@@ -44,7 +44,6 @@ feature_map <- list(
   "Thick wall cavities" = "thick"
 )
 
-# Custom color palette
 score_colors <- c("0" = "#be64ac", "1" = "#5ec9c2", "2" = "#3b9142", "3" = "#e34a33")
 
 ui <- fluidPage(
@@ -52,7 +51,10 @@ ui <- fluidPage(
   sidebarLayout(
     sidebarPanel(
       selectInput("feature", "Choose a CT Feature:", choices = names(feature_map)),
-      selectInput("rater", "Choose Rater:", choices = c("Overall", "JW", "VH"))
+      selectInput("rater",   "Choose Rater:"      , choices = c("Overall", "JW", "VH")),
+      tags$hr(),
+      h4("Lung lobe visual"),
+      imageOutput("lungImage", height = "400px")
     ),
     mainPanel(
       plotlyOutput("barPlot", height = "550px")
@@ -60,38 +62,59 @@ ui <- fluidPage(
   )
 )
 
-server <- function(input, output) {
+server <- function(input, output, session) {
+  
+  # ---------------------------------------------------------------
+  #   1.  STACKED BAR (unchanged, except keep key = tolower(lobe))
+  # ---------------------------------------------------------------
   output$barPlot <- renderPlotly({
-    # Get data
-    feature_data <- get(feature_map[[input$feature]])
+    df <- get(feature_map[[input$feature]])
+    if (input$rater != "Overall") df <- dplyr::filter(df, rater == input$rater)
     
-    # Apply rater filter
-    if (input$rater != "Overall") {
-      feature_data <- feature_data %>% filter(rater == input$rater)
-    }
-    
-    # Prepare for plotting
-    plot_data <- feature_data %>%
-      count(lobe, score) %>%
+    plot_data <- df |>
+      count(lobe, score) |>
       mutate(score = factor(score, levels = c(3, 2, 1, 0)))
     
-    # Make ggplot object
-    p <- ggplot(plot_data, aes(x = lobe, y = n, fill = score, text = paste0(
-      "Lobe: ", lobe, "<br>",
-      "Score: ", score, "<br>",
-      "Count: ", n
-    ))) +
+    p <- ggplot(plot_data,
+                aes(x = lobe,
+                    y = n,
+                    fill = score,
+                    key = tolower(lobe),        # <── key we will read back
+                    text = paste0("Lobe: ", lobe,
+                                  "<br>Score: ", score,
+                                  "<br>Count: ", n))) +
       geom_bar(stat = "identity", position = "stack") +
       scale_fill_manual(values = score_colors) +
-      labs(
-        title = paste("Distribution of", input$feature, "Scores by Lobe",
-                      if (input$rater != "Overall") paste("(", input$rater, ")") else ""),
-        x = "Lobe", y = "Count", fill = "Score"
-      ) +
+      labs(title = paste("Distribution of", input$feature, "scores by lobe",
+                         if (input$rater != "Overall") paste0(" (", input$rater, ")") else ""),
+           x = "Lobe", y = "Count", fill = "Score") +
       theme_minimal()
     
-    ggplotly(p, tooltip = "text") %>% config(displayModeBar = FALSE)
+    ggplotly(p, tooltip = "text", source = "barplot") |>
+      config(displayModeBar = FALSE)
   })
+  
+  # ---------------------------------------------------------------
+  #   2.  REACTIVE IMAGE
+  # ---------------------------------------------------------------
+  output$lungImage <- renderImage({
+    
+    ev <- event_data("plotly_click", source = "barplot")
+    # If nothing clicked yet → NULL
+    lobe_click <- if (is.null(ev) || is.null(ev$key)) NULL else ev$key
+    
+    # Build the file name
+    file_name <- if (is.null(lobe_click) || lobe_click == "")
+      "lung_default.png"
+    else
+      paste0("lung_", lobe_click, ".png")   # lobe_click already lower-case
+    
+    # Give Shiny an *absolute* path
+    list(src         = normalizePath(file.path("www", file_name)),
+         contentType = "image/png",
+         width       = "100%",
+         alt         = paste("Lung diagram:", lobe_click %||% "default"))
+  }, deleteFile = FALSE)
 }
 
-shinyApp(ui = ui, server = server)
+shinyApp(ui, server)
