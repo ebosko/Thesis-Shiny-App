@@ -1,8 +1,8 @@
 library(shiny)
 library(tidyverse)
 library(readxl)
-library(MASS)
 library(ggplot2)
+library(ggiraph)
 
 #load data
 #read in data
@@ -32,65 +32,66 @@ ln$feature <- "ln"
 thin$feature <- "thin"
 thick$feature <- "thick"
 
-# Combine all datasets into one
-all_data <- bind_rows(tib, ggo, cons, bronch, atel, ln, thin, thick)
+# Feature map for user-friendly display
+feature_map <- list(
+  "Tree-in-bud" = "tib",
+  "Ground-glass opacities" = "ggo",
+  "Consolidation" = "cons",
+  "Bronchiectasis" = "bronch",
+  "Atelectasis" = "atel",
+  "Large nodules" = "ln",
+  "Thin wall cavities" = "thin",
+  "Thick wall cavities" = "thick"
+)
 
-# Define UI
+# Custom color palette
+score_colors <- c("0" = "#be64ac", "1" = "#5ec9c2", "2" = "#3b9142", "3" = "#e34a33")
+
 ui <- fluidPage(
   titlePanel("CT Feature Score Distributions by Lobe"),
-  
   sidebarLayout(
     sidebarPanel(
-      selectInput("feature", "Choose a CT Feature:",
-                  choices = c("Tree-in-Bud" = "tib",
-                              "Ground Glass Opacities" = "ggo",
-                              "Consolidation" = "cons",
-                              "Bronchiectasis" = "bronch",
-                              "Atelectasis" = "atel",
-                              "Large Nodules" = "ln",
-                              "Thin Wall Cavity" = "thin",
-                              "Thick Wall Cavity" = "thick")),
-      
-      selectInput("rater", "Choose Rater:",
-                  choices = c("Overall" = "overall", "JW" = "JW", "VH" = "VH"),
-                  selected = "overall")
+      selectInput("feature", "Choose a CT Feature:", choices = names(feature_map)),
+      selectInput("rater", "Choose Rater:", choices = c("Overall", "JW", "VH"))
     ),
-    
     mainPanel(
-      plotOutput("barPlot")
+      plotlyOutput("barPlot", height = "550px")
     )
   )
 )
 
-# Define server logic
 server <- function(input, output) {
-  
-  output$barPlot <- renderPlot({
-    df <- all_data %>%
-      filter(feature == input$feature)
+  output$barPlot <- renderPlotly({
+    # Get data
+    feature_data <- get(feature_map[[input$feature]])
     
-    if (input$rater != "overall") {
-      df <- df %>% filter(rater == input$rater)
+    # Apply rater filter
+    if (input$rater != "Overall") {
+      feature_data <- feature_data %>% filter(rater == input$rater)
     }
     
-    df %>%
-      mutate(score = factor(score, levels = c(3, 2, 1, 0))) %>%
-      ggplot(aes(x = lobe, fill = score)) +
-      geom_bar(position = "stack") +
+    # Prepare for plotting
+    plot_data <- feature_data %>%
+      count(lobe, score) %>%
+      mutate(score = factor(score, levels = c(3, 2, 1, 0)))
+    
+    # Make ggplot object
+    p <- ggplot(plot_data, aes(x = lobe, y = n, fill = score, text = paste0(
+      "Lobe: ", lobe, "<br>",
+      "Score: ", score, "<br>",
+      "Count: ", n
+    ))) +
+      geom_bar(stat = "identity", position = "stack") +
+      scale_fill_manual(values = score_colors) +
       labs(
-        title = paste0(
-          "Distribution of ",
-          if (input$rater != "overall") paste0(input$rater, "'s ") else "",
-          toupper(input$feature),
-          " Scores by Lobe"
-        ),
-        x = "Lobe",
-        y = "Count",
-        fill = "Score"
+        title = paste("Distribution of", input$feature, "Scores by Lobe",
+                      if (input$rater != "Overall") paste("(", input$rater, ")") else ""),
+        x = "Lobe", y = "Count", fill = "Score"
       ) +
       theme_minimal()
+    
+    ggplotly(p, tooltip = "text") %>% config(displayModeBar = FALSE)
   })
 }
 
-# Run the application 
 shinyApp(ui = ui, server = server)
