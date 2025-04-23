@@ -78,7 +78,12 @@ server <- function(input, output) {
       ggplot(aes(x = lobe, fill = score)) +
       geom_bar(position = "stack") +
       labs(
-        title = paste("Distribution of", toupper(input$feature), "Scores by Lobe"),
+        title = paste0(
+          "Distribution of ",
+          if (input$rater != "overall") paste0(input$rater, "'s ") else "",
+          toupper(input$feature),
+          " Scores by Lobe"
+        ),
         x = "Lobe",
         y = "Count",
         fill = "Score"
